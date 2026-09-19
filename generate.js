@@ -57,8 +57,9 @@ function parseRepr(value) {
 function buildDlcEntry(val, backfill) {
   const out = {};
 
-  if (backfill && typeof backfill.name === 'string') {
-    out.name = cleanName(backfill.name);
+  // 输出字段统一使用短键：name -> n
+  if (backfill && typeof backfill.n === 'string') {
+    out.n = cleanName(backfill.n);
   }
 
   let extracted = null;
@@ -73,7 +74,7 @@ function buildDlcEntry(val, backfill) {
   }
 
   if (extracted && extracted.name) {
-    out.name = cleanName(extracted.name);
+    out.n = cleanName(extracted.name);
   }
 
   return out;
@@ -118,7 +119,7 @@ function main() {
     if (typeof e.type !== 'string' || e.type.toLowerCase() !== 'dlc') continue;
 
     const info = {};
-    if (typeof e.name === 'string') info.name = e.name;
+    if (typeof e.name === 'string') info.n = e.name;
 
     backfill.set(id, info);
   }
@@ -137,12 +138,19 @@ function main() {
 
     const g = {};
 
-    if (typeof e.name === 'string') g.name = cleanName(e.name);
-    if (typeof e.type === 'string') g.type = e.type.toLowerCase();
-    if (typeof e.drm === 'boolean') g.drm = e.drm;
-    if (typeof e.nsfw === 'boolean') g.nsfw = e.nsfw;
-    if (typeof e.added_date === 'string') g.added_date = e.added_date;
-    if (typeof e.updated_date === 'string') g.updated_date = e.updated_date;
+    // games.json 字段压缩：
+    // name -> n
+    // type -> t
+    // drm -> d, boolean -> 0/1
+    // nsfw -> f, boolean -> 0/1
+    // added_date -> at
+    // updated_date -> ut
+    if (typeof e.name === 'string') g.n = cleanName(e.name);
+    if (typeof e.type === 'string') g.t = e.type.toLowerCase();
+    if (typeof e.drm === 'boolean') g.d = e.drm ? 1 : 0;
+    if (typeof e.nsfw === 'boolean') g.f = e.nsfw ? 1 : 0;
+    if (typeof e.added_date === 'string') g.at = e.added_date;
+    if (typeof e.updated_date === 'string') g.ut = e.updated_date;
 
     gamesOut.set(id, g);
   }
