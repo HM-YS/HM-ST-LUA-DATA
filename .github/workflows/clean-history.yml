@@ -1,0 +1,176 @@
+name: 压缩 Git 历史
+
+# 手动触发的历史压缩。
+# 每次运行都会将 main 的全部 Git 历史压缩为一个新的 root commit。
+#
+# 不设置 schedule，避免自动改写历史。
+#
+# 需要仓库 Secrets：
+#   COMPACT_TOKEN
+#
+# COMPACT_TOKEN 推荐使用 Fine-grained PAT：
+#   Contents  → Read and write
+#   Workflows → Read and write
+#   Metadata  → Read-only
+#
+# 注意：
+#   该 Workflow 不会删除任何项目文件。
+#   clean-history.yml 自身也会被保留，因此以后可以重复执行。
+
+on:
+  workflow_dispatch:
+
+# GITHUB_TOKEN 只用于读取仓库。
+# 实际 force push 使用 COMPACT_TOKEN。
+permissions:
+  contents: read
+
+jobs:
+  compact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      # ============================================================
+      # 1. Checkout
+      # ============================================================
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+          # 非常重要：
+          # 不让 actions/checkout 把 GITHUB_TOKEN
+          # 持久化到 Git 配置中。
+          persist-credentials: false
+
+      # ============================================================
+      # 2. 验证 checkout 没有留下 GITHUB_TOKEN
+      # ============================================================
+      - name: Verify checkout credentials are disabled
+        run: |
+          if git config --local --get http.https://github.com/.extraheader > /dev/null 2>&1; then
+            echo "::error::GitHub checkout credentials are still configured"
+            exit 1
+          fi
+
+          echo "Checkout credentials are disabled"
+
+      # ============================================================
+      # 3. 压缩前检查数据
+      #
+      # 防止数据损坏时把坏数据固化成唯一 Commit。
+      # ============================================================
+      - name: Sanity-check current data
+        run: |
+          node -e "
+            const fs = require('fs');
+
+            const versionPath = 'data/version.json';
+            const gamesPath = 'data/games.json';
+
+            if (!fs.existsSync(versionPath)) {
+              console.error('missing data/version.json');
+              process.exit(1);
+            }
+
+            if (!fs.existsSync(gamesPath)) {
+              console.error('missing data/games.json');
+              process.exit(1);
+            }
+
+            const v = JSON.parse(
+              fs.readFileSync(versionPath, 'utf8')
+            );
+
+            const g = JSON.parse(
+              fs.readFileSync(gamesPath, 'utf8')
+            );
+
+            const n = Object.keys(g).length;
+
+            if (n < 30000 || v.games_count < 30000) {
+              console.error(
+                'data looks unhealthy: ' +
+                n +
+                ' games, ' +
+                v.games_count +
+                ' reported games'
+              );
+
+              process.exit(1);
+            }
+
+            console.log(
+              'data ok: ' +
+              n +
+              ' games, ' +
+              v.dlc_count +
+              ' dlc entries'
+            );
+          "
+
+      # ============================================================
+      # 4. 检查 COMPACT_TOKEN
+      # ============================================================
+      - name: Verify COMPACT_TOKEN
+        env:
+          COMPACT_TOKEN: ${{ secrets.COMPACT_TOKEN }}
+        run: |
+          if [ -z "$COMPACT_TOKEN" ]; then
+            echo "::error::COMPACT_TOKEN secret is not configured"
+            exit 1
+          fi
+
+          if [[ "$COMPACT_TOKEN" != github_pat_* ]]; then
+            echo "::error::COMPACT_TOKEN does not appear to be a fine-grained PAT"
+            exit 1
+          fi
+
+          echo "COMPACT_TOKEN is available"
+
+      # ============================================================
+      # 5. 创建新的单 Commit 历史
+      #
+      # 注意：
+      # 不删除任何文件。
+      #
+      # 因此以下文件都会继续存在：
+      #   .github/workflows/clean-history.yml
+      #   .github/workflows/update-games.yml
+      #   data/games.json
+      #   data/version.json
+      #   其他所有项目文件
+      # ============================================================
+      - name: Compact history into a single commit
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 创建没有历史的新 orphan 分支
+          git checkout --orphan compact-tmp
+
+          # 清除暂存区，但不删除工作区文件
+          git reset
+
+          # 将当前工作区全部文件加入新的 Commit
+          git add -A
+
+          # 创建唯一的 root commit
+          git commit -m "chore: compact history"
+
+      # ============================================================
+      # 6. 强制推送到 main
+      #
+      # 禁止 Git 使用 checkout 留下的凭据。
+      # 明确使用 COMPACT_TOKEN。
+      # ============================================================
+      - name: Force push compacted history
+        env:
+          COMPACT_TOKEN: ${{ secrets.COMPACT_TOKEN }}
+        run: |
+          git -c credential.helper= \
+            -c http.https://github.com/.extraheader= \
+            push --force \
+            "https://x-access-token:${COMPACT_TOKEN}@github.com/HM-YS/HM-ST-LUA-DATA.git" \
+            HEAD:main
