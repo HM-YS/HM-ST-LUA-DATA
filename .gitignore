@@ -1,0 +1,8 @@
+# 上游原始数据（45MB+），永不入库
+games_source.json
+
+# 生成器临时文件
+data/*.tmp
+*.tmp
+
+node_modules/

@@ -1,0 +1,76 @@
+name: 获取 Steam 数据
+run-name: 获取并更新 Steam AppID 数据
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 */1 * * *"
+
+permissions:
+  contents: write
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download source data
+        run: |
+          curl -fSL --retry 3 --retry-delay 10 --max-time 600 \
+            -o games_source.json \
+            "${{ secrets.GAMES_SOURCE_URL }}"
+
+          if [ "$(stat -c%s games_source.json)" -lt 10000000 ]; then
+            echo "::error::source too small (corrupted/truncated download)"
+            exit 1
+          fi
+
+      - name: Generate database
+        run: |
+          node generate.js games_source.json
+
+      - name: Clean temporary files
+        run: |
+          rm -f games_source.json data/*.tmp
+
+      - name: Commit and push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git add data/
+
+          if git diff --cached --quiet; then
+            echo "::notice::No database change, skipping commit"
+            exit 0
+          fi
+
+          git commit -m "chore(data): update steam games database"
+
+          # 获取最新的 main，避免历史压缩或其他提交
+          # 导致 non-fast-forward
+          git fetch origin main
+
+          # 将本次数据库更新建立在最新 main 之上
+          git rebase origin/main
+
+          # 推送到 main
+          git push origin HEAD:main

@@ -1,0 +1,10 @@
+{
+  "name": "hm-st-data",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Steam games database generator (zero-dependency, Node built-ins only)",
+  "license": "UNLICENSED",
+  "scripts": {
+    "generate": "node generate.js games_source.json"
+  }
+}
